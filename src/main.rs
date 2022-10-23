@@ -4,11 +4,6 @@ use std::sync::Mutex;
 mod app_error;
 mod handlers;
 mod trie;
-
-fn main() {
-    let trie: Arc<Mutex<trie::Trie>>;
-}
-
 // PARAMS: suggestion_number, port, host
 
 // DB
@@ -39,3 +34,8 @@ fn main() {
 
 // QUESTIONS:
 // 1. Think we should store the tree on the disk or load the entire dataset into memory. Ask about file size?
+
+fn main() {
+    // let trie: Arc<Mutex<trie::Trie>> = trie::Trie::new(10);
+    // let x = trie.lock().unwrap();
+}
