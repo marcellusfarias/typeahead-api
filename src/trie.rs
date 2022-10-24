@@ -1,23 +1,55 @@
-use std::collections::HashMap;
-use std::fs;
-use std::io::prelude::*;
-
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use std::collections::HashMap;
 
-const NAMES_FILE_PATH: &str = "./names.json";
-
+// all methodos should return a RESULT. Need to remove unwraps from them
 trait ITrie {
     fn initialize(file_content: &str, suggestion_number: u8) -> Trie;
-    fn insert_word(&mut self, word: String, popularity: u16); // change this to return a RESULT-
+    fn insert_word(&mut self, word: String, popularity: u16);
     fn increase_popularity(&mut self, word: String);
-    fn search_with_prefix(&mut self, prefix: String) -> Vec<(String, u16)>;
+    fn search_with_prefix(&self, prefix: String) -> Vec<(String, u16)>;
 }
 
 #[derive(Debug, Clone)]
 pub struct Trie {
     pub root: Box<TrieNode>,
     pub suggestion_number: u8,
+}
+
+impl Trie {
+    fn search_all_words_from_node(
+        node: &Box<TrieNode>,
+        current_word: String,
+        vec: &mut Vec<(String, u16)>,
+    ) {
+        for (letter, child_node) in &node.children {
+            let mut new_word = current_word.clone();
+            new_word.push(*letter);
+
+            if let Some(value) = child_node.value {
+                vec.push((new_word.clone(), value));
+            }
+
+            Trie::search_all_words_from_node(child_node, new_word, vec);
+        }
+    }
+}
+
+fn handle_case_sensitive(prefix: String) -> String {
+    if prefix.is_empty() {
+        return prefix;
+    }
+
+    let mut handled_prefix = String::new();
+    for char in prefix.chars() {
+        handled_prefix.push(char.to_ascii_lowercase());
+    }
+
+    let mut v: Vec<char> = handled_prefix.chars().collect();
+    v[0] = v[0].to_uppercase().nth(0).unwrap();
+    let handled_prefix: String = v.into_iter().collect();
+
+    handled_prefix
 }
 
 impl ITrie for Trie {
@@ -58,8 +90,6 @@ impl ITrie for Trie {
         }
     }
 
-    //return RESULT
-    //remove unwrap
     fn increase_popularity(&mut self, word: String) {
         let mut node = &mut self.root;
 
@@ -70,8 +100,30 @@ impl ITrie for Trie {
         node.value = Some(node.value.unwrap_or(0) + 1);
     }
 
-    fn search_with_prefix(&mut self, prefix: String) -> Vec<(String, u16)> {
-        todo!()
+    //[ok] order by value and return SUGGESTION_NUMBER items
+    //[test] name in ascending order if they have equal popularity
+    //[test] always leaving the exact match (a name that is exactly the received prefix) at the beginning if there is one
+    //[ok] If the prefix segment of the path is not given or it's empty, it returns the SUGGESTION_NUMBER names with the highest popularity.
+    //[ok] handle case sensitive
+    fn search_with_prefix(&self, prefix: String) -> Vec<(String, u16)> {
+        let mut node = &self.root;
+        let suggestion_number: usize = self.suggestion_number.into();
+        let prefix = handle_case_sensitive(prefix);
+
+        for char in prefix.chars() {
+            node = node.children.get(&char).unwrap();
+        }
+
+        let mut words_match_prefix: Vec<(String, u16)> = Vec::new();
+        if let Some(value) = node.value {
+            words_match_prefix.push((prefix.clone(), value));
+        }
+
+        Trie::search_all_words_from_node(node, prefix, &mut words_match_prefix);
+        words_match_prefix.sort_by(|a, b| b.1.cmp(&a.1));
+        words_match_prefix.truncate(suggestion_number);
+
+        words_match_prefix
     }
 }
 
@@ -99,6 +151,7 @@ mod tests {
     use super::*;
 
     fn compare_tries(root_a: &Box<TrieNode>, root_b: &Box<TrieNode>) -> bool {
+        //two comparisons because order can change.
         let is_b_equal_a = recursive_compare_nodes(root_a, root_b);
         let is_a_equal_b = recursive_compare_nodes(root_b, root_a);
 
@@ -194,6 +247,8 @@ mod tests {
             .insert('a', Box::new(TrieNode::new('a', Some(5))));
         node.children
             .insert('e', Box::new(TrieNode::new('e', Some(50))));
+        node.children
+            .insert('c', Box::new(TrieNode::new('c', Some(50))));
 
         expected_trie
     }
@@ -261,10 +316,11 @@ mod tests {
 
         expected_trie
     }
+
     #[test]
     fn t_initialize() {
         let file_content =
-            "{\"Aar\":361,\"Aari\":151,\"Aba\":704,\"Abag\":608, \"Abe\": 300, \"Ba\": 5, \"Be\": 50}";
+            "{\"Aar\":361,\"Aari\":151,\"Aba\":704,\"Abag\":608, \"Abe\": 300, \"Ba\": 5, \"Be\": 50, \"Bc\": 50}";
         let trie = Trie::initialize(file_content, 10);
 
         let expected_trie = initialize_testing_trie();
@@ -291,5 +347,90 @@ mod tests {
         // print_trie(&expected_trie.root, 0);
 
         assert!(compare_tries(&trie.root, &expected_trie.root));
+    }
+
+    #[test]
+    fn t_search_with_prefix_prefix_not_included() {
+        let trie = initialize_testing_trie();
+
+        let words = trie.search_with_prefix("Ab".to_string());
+
+        let expected_words: Vec<(String, u16)> = vec![
+            ("Aba".to_string(), 704),
+            ("Abag".to_string(), 608),
+            ("Abe".to_string(), 300),
+        ];
+
+        assert_eq!(expected_words, words);
+    }
+
+    #[test]
+    fn t_search_with_prefix_prefix_included() {
+        let trie = initialize_testing_trie();
+
+        let words = trie.search_with_prefix("Aba".to_string());
+
+        let expected_words: Vec<(String, u16)> =
+            vec![("Aba".to_string(), 704), ("Abag".to_string(), 608)];
+
+        assert_eq!(expected_words, words);
+    }
+
+    #[test]
+    fn t_search_with_prefix_take_two() {
+        let mut trie = initialize_testing_trie();
+        trie.suggestion_number = 2;
+        let words = trie.search_with_prefix("Ab".to_string());
+
+        let expected_words: Vec<(String, u16)> =
+            vec![("Aba".to_string(), 704), ("Abag".to_string(), 608)];
+
+        assert_eq!(expected_words, words);
+    }
+
+    #[test]
+    fn t_search_with_prefix_empty_prefix() {
+        let mut trie = initialize_testing_trie();
+        trie.suggestion_number = 3;
+        let words = trie.search_with_prefix("".to_string());
+
+        let expected_words: Vec<(String, u16)> = vec![
+            ("Aba".to_string(), 704),
+            ("Abag".to_string(), 608),
+            ("Aar".to_string(), 361),
+        ];
+
+        assert_eq!(expected_words, words);
+    }
+
+    #[test]
+    fn t_search_with_prefix_same_value() {
+        let mut trie = initialize_testing_trie();
+        trie.suggestion_number = 2;
+        let words = trie.search_with_prefix("B".to_string());
+
+        let expected_words: Vec<(String, u16)> =
+            vec![("Be".to_string(), 50), ("Bc".to_string(), 50)];
+
+        assert_eq!(expected_words, words);
+    }
+
+    #[test]
+    fn t_search_with_prefix_case_insensitive() {
+        let mut trie = initialize_testing_trie();
+        trie.suggestion_number = 2;
+        let words = trie.search_with_prefix("b".to_string());
+
+        let expected_words: Vec<(String, u16)> =
+            vec![("Be".to_string(), 50), ("Bc".to_string(), 50)];
+
+        assert_eq!(expected_words, words);
+
+        let words = trie.search_with_prefix("AA".to_string());
+
+        let expected_words: Vec<(String, u16)> =
+            vec![("Aar".to_string(), 361), ("Aari".to_string(), 151)];
+
+        assert_eq!(expected_words, words);
     }
 }
