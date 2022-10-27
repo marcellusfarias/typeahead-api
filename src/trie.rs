@@ -101,7 +101,7 @@ impl ITrie for Trie {
     }
 
     //[ok] order by value and return SUGGESTION_NUMBER items
-    //[test] name in ascending order if they have equal popularity
+    //[ok] name in ascending order if they have equal popularity
     //[test] always leaving the exact match (a name that is exactly the received prefix) at the beginning if there is one
     //[ok] If the prefix segment of the path is not given or it's empty, it returns the SUGGESTION_NUMBER names with the highest popularity.
     //[ok] handle case sensitive
@@ -120,7 +120,9 @@ impl ITrie for Trie {
         }
 
         Trie::search_all_words_from_node(node, prefix, &mut words_match_prefix);
-        words_match_prefix.sort_by(|a, b| b.1.cmp(&a.1));
+        words_match_prefix.sort_by(|(name_one, score_one), (name_two, score_two)| {
+            score_two.cmp(score_one).then(name_one.cmp(name_two))
+        });
         words_match_prefix.truncate(suggestion_number);
 
         words_match_prefix
@@ -410,7 +412,7 @@ mod tests {
         let words = trie.search_with_prefix("B".to_string());
 
         let expected_words: Vec<(String, u16)> =
-            vec![("Be".to_string(), 50), ("Bc".to_string(), 50)];
+            vec![("Bc".to_string(), 50), ("Be".to_string(), 50)];
 
         assert_eq!(expected_words, words);
     }
@@ -422,7 +424,7 @@ mod tests {
         let words = trie.search_with_prefix("b".to_string());
 
         let expected_words: Vec<(String, u16)> =
-            vec![("Be".to_string(), 50), ("Bc".to_string(), 50)];
+            vec![("Bc".to_string(), 50), ("Be".to_string(), 50)];
 
         assert_eq!(expected_words, words);
 
