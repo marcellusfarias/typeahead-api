@@ -1,5 +1,3 @@
-use actix_web::App;
-
 use crate::app_error::AppError;
 use std::collections::HashMap;
 
@@ -13,13 +11,13 @@ trait ITrie {
 
 #[derive(Debug, Clone)]
 pub struct Trie {
-    pub root: Box<TrieNode>,
+    pub root: Box<Node>,
     pub suggestion_number: u8,
 }
 
 impl Trie {
-    fn get_words_with_same_prefix(prefix_node: &Box<TrieNode>, result_vec: &mut Vec<WordData>) {
-        for (_letter, child_node) in &prefix_node.children {
+    fn get_words_with_same_prefix(prefix_node: &Node, result_vec: &mut Vec<WordData>) {
+        for child_node in prefix_node.children.values() {
             if let Some(word_data) = child_node.word_data.clone() {
                 result_vec.push(word_data);
             }
@@ -32,7 +30,7 @@ impl Trie {
 impl ITrie for Trie {
     fn initialize(file_content: &str, suggestion_number: u8) -> Result<Trie, AppError> {
         let mut trie = Trie {
-            root: Box::new(TrieNode::new(' ', None)),
+            root: Box::new(Node::new(' ', None)),
             suggestion_number,
         };
 
@@ -48,13 +46,17 @@ impl ITrie for Trie {
 
     fn insert_word(&mut self, word: String, popularity: u16) -> Result<(), AppError> {
         let mut node = &mut self.root;
-        let lowercase_word = word.clone().to_ascii_lowercase();
+        let lowercase_word = word.to_ascii_lowercase();
 
         for char in lowercase_word.chars() {
-            if !node.children.contains_key(&char) {
-                let new_node = Box::new(TrieNode::new(char.clone(), None));
-                node.children.insert(char, new_node);
-            }
+            node.children
+                .entry(char)
+                .or_insert_with(|| Box::new(Node::new(char, None)));
+
+            // if !node.children.contains_key(&char) {
+            //     let new_node = Box::new(TrieNode::new(char.clone(), None));
+            //     node.children.insert(char, new_node);
+            // }
 
             node = node
                 .children
@@ -69,7 +71,7 @@ impl ITrie for Trie {
 
     fn increase_popularity(&mut self, word: String) -> Result<WordData, AppError> {
         let mut node = &mut self.root;
-        let lowercase_word = word.clone().to_ascii_lowercase();
+        let lowercase_word = word.to_ascii_lowercase();
 
         for char in lowercase_word.chars() {
             node = node
@@ -79,7 +81,7 @@ impl ITrie for Trie {
         }
 
         let mut updated_word_data = node.word_data.clone().ok_or(AppError::WordDoesNotExist)?;
-        updated_word_data.popularity = updated_word_data.popularity + 1;
+        updated_word_data.popularity += 1;
         node.word_data = Some(updated_word_data.clone());
 
         Ok(updated_word_data)
@@ -129,7 +131,7 @@ impl ITrie for Trie {
 
 //storing the word in the node so we can work with lowercase all over the way avoiding case insensitive problems.
 //assuming we can't have 2 same words but with different casing. E.g., Rose-Marie and Rose-marie
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WordData {
     pub word: String,
     pub popularity: u16,
@@ -142,15 +144,15 @@ impl WordData {
 }
 
 #[derive(Debug, Clone)]
-pub struct TrieNode {
-    pub children: HashMap<char, Box<TrieNode>>,
+pub struct Node {
+    pub children: HashMap<char, Box<Node>>,
     pub letter: char,
     pub word_data: Option<WordData>,
 }
 
-impl TrieNode {
-    pub fn new(letter: char, word_data: Option<WordData>) -> TrieNode {
-        TrieNode {
+impl Node {
+    pub fn new(letter: char, word_data: Option<WordData>) -> Node {
+        Node {
             children: HashMap::new(),
             letter,
             word_data,
@@ -162,7 +164,7 @@ impl TrieNode {
 mod tests {
     use super::*;
 
-    fn compare_tries(root_a: &Box<TrieNode>, root_b: &Box<TrieNode>) -> bool {
+    fn compare_tries(root_a: &Box<Node>, root_b: &Box<Node>) -> bool {
         //two comparisons because order can change.
         println!("Comparing b to a");
         let is_b_equal_a = recursively_compare_tries(root_a, root_b);
@@ -173,7 +175,7 @@ mod tests {
         is_b_equal_a && is_a_equal_b
     }
 
-    fn recursively_compare_tries(node_a: &Box<TrieNode>, node_b: &Box<TrieNode>) -> bool {
+    fn recursively_compare_tries(node_a: &Box<Node>, node_b: &Box<Node>) -> bool {
         let mut return_value = true;
 
         if node_a.letter != node_b.letter || node_a.word_data != node_b.word_data {
@@ -195,7 +197,7 @@ mod tests {
         return_value
     }
 
-    fn print_trie(node: &Box<TrieNode>, mut i: u8) {
+    fn print_trie(node: &Box<Node>, mut i: u8) {
         println!("[{}] {}-{:?}", i, node.letter, node.word_data);
         i = i + 1;
         for child in &node.children {
@@ -205,43 +207,33 @@ mod tests {
 
     fn initialize_testing_trie() -> Trie {
         let mut expected_trie = Trie {
-            root: Box::new(TrieNode::new(' ', None)),
+            root: Box::new(Node::new(' ', None)),
             suggestion_number: 10,
         };
 
-        let mut node: &mut Box<TrieNode> = &mut expected_trie.root;
+        let mut node: &mut Box<Node> = &mut expected_trie.root;
 
         // (A) first level
-        node.children
-            .insert('a', Box::new(TrieNode::new('a', None)));
+        node.children.insert('a', Box::new(Node::new('a', None)));
 
         // (A) second level
         node = node.children.get_mut(&'a').unwrap();
-        node.children
-            .insert('a', Box::new(TrieNode::new('a', None)));
-        node.children
-            .insert('b', Box::new(TrieNode::new('b', None)));
-        node.children
-            .insert('-', Box::new(TrieNode::new('-', None)));
+        node.children.insert('a', Box::new(Node::new('a', None)));
+        node.children.insert('b', Box::new(Node::new('b', None)));
+        node.children.insert('-', Box::new(Node::new('-', None)));
 
         // (A) third level
         node = node.children.get_mut(&'a').unwrap();
         node.children.insert(
             'r',
-            Box::new(TrieNode::new(
-                'r',
-                Some(WordData::new("Aar".to_string(), 361)),
-            )),
+            Box::new(Node::new('r', Some(WordData::new("Aar".to_string(), 361)))),
         );
 
         // (A) fourth level
         node = node.children.get_mut(&'r').unwrap();
         node.children.insert(
             'i',
-            Box::new(TrieNode::new(
-                'i',
-                Some(WordData::new("Aari".to_string(), 151)),
-            )),
+            Box::new(Node::new('i', Some(WordData::new("Aari".to_string(), 151)))),
         );
 
         // (A) third level
@@ -250,20 +242,14 @@ mod tests {
         node = node.children.get_mut(&'b').unwrap();
         node.children.insert(
             'a',
-            Box::new(TrieNode::new(
-                'a',
-                Some(WordData::new("Aba".to_string(), 608)),
-            )),
+            Box::new(Node::new('a', Some(WordData::new("Aba".to_string(), 608)))),
         );
 
         // (A) fourth level
         node = node.children.get_mut(&'a').unwrap();
         node.children.insert(
             'g',
-            Box::new(TrieNode::new(
-                'g',
-                Some(WordData::new("Abag".to_string(), 704)),
-            )),
+            Box::new(Node::new('g', Some(WordData::new("Abag".to_string(), 704)))),
         );
 
         // (A) third level
@@ -272,10 +258,7 @@ mod tests {
         node = node.children.get_mut(&'b').unwrap();
         node.children.insert(
             'e',
-            Box::new(TrieNode::new(
-                'e',
-                Some(WordData::new("Abe".to_string(), 300)),
-            )),
+            Box::new(Node::new('e', Some(WordData::new("Abe".to_string(), 300)))),
         );
 
         // (A) third level
@@ -284,46 +267,33 @@ mod tests {
         node = node.children.get_mut(&'-').unwrap();
         node.children.insert(
             'b',
-            Box::new(TrieNode::new(
-                'b',
-                Some(WordData::new("A-b".to_string(), 23)),
-            )),
+            Box::new(Node::new('b', Some(WordData::new("A-b".to_string(), 23)))),
         );
 
         // (B) first level
         node = &mut expected_trie.root;
-        node.children
-            .insert('b', Box::new(TrieNode::new('b', None)));
+        node.children.insert('b', Box::new(Node::new('b', None)));
 
         // (B) second level
         node = node.children.get_mut(&'b').unwrap();
         node.children.insert(
             'a',
-            Box::new(TrieNode::new('a', Some(WordData::new("Ba".to_string(), 5)))),
+            Box::new(Node::new('a', Some(WordData::new("Ba".to_string(), 5)))),
         );
         node.children.insert(
             'e',
-            Box::new(TrieNode::new(
-                'e',
-                Some(WordData::new("Be".to_string(), 50)),
-            )),
+            Box::new(Node::new('e', Some(WordData::new("Be".to_string(), 50)))),
         );
         node.children.insert(
             'c',
-            Box::new(TrieNode::new(
-                'c',
-                Some(WordData::new("Bc".to_string(), 50)),
-            )),
+            Box::new(Node::new('c', Some(WordData::new("Bc".to_string(), 50)))),
         );
 
         // (B) third level
         node = node.children.get_mut(&'a').unwrap();
         node.children.insert(
             'h',
-            Box::new(TrieNode::new(
-                'h',
-                Some(WordData::new("Bah".to_string(), 5)),
-            )),
+            Box::new(Node::new('h', Some(WordData::new("Bah".to_string(), 5)))),
         );
 
         expected_trie
@@ -331,43 +301,33 @@ mod tests {
 
     fn insert_word_testing_trie() -> Trie {
         let mut expected_trie = Trie {
-            root: Box::new(TrieNode::new(' ', None)),
+            root: Box::new(Node::new(' ', None)),
             suggestion_number: 10,
         };
 
-        let mut node: &mut Box<TrieNode> = &mut expected_trie.root;
+        let mut node: &mut Box<Node> = &mut expected_trie.root;
 
         // (A) first level
-        node.children
-            .insert('a', Box::new(TrieNode::new('a', None)));
+        node.children.insert('a', Box::new(Node::new('a', None)));
 
         // (A) second level
         node = node.children.get_mut(&'a').unwrap();
-        node.children
-            .insert('a', Box::new(TrieNode::new('a', None)));
-        node.children
-            .insert('b', Box::new(TrieNode::new('b', None)));
-        node.children
-            .insert('-', Box::new(TrieNode::new('-', None)));
+        node.children.insert('a', Box::new(Node::new('a', None)));
+        node.children.insert('b', Box::new(Node::new('b', None)));
+        node.children.insert('-', Box::new(Node::new('-', None)));
 
         // (A) third level
         node = node.children.get_mut(&'a').unwrap();
         node.children.insert(
             'r',
-            Box::new(TrieNode::new(
-                'r',
-                Some(WordData::new("Aar".to_string(), 361)),
-            )),
+            Box::new(Node::new('r', Some(WordData::new("Aar".to_string(), 361)))),
         );
 
         // (A) fourth level
         node = node.children.get_mut(&'r').unwrap();
         node.children.insert(
             'i',
-            Box::new(TrieNode::new(
-                'i',
-                Some(WordData::new("Aari".to_string(), 151)),
-            )),
+            Box::new(Node::new('i', Some(WordData::new("Aari".to_string(), 151)))),
         );
 
         // (A) third level
@@ -376,20 +336,14 @@ mod tests {
         node = node.children.get_mut(&'b').unwrap();
         node.children.insert(
             'a',
-            Box::new(TrieNode::new(
-                'a',
-                Some(WordData::new("Aba".to_string(), 608)),
-            )),
+            Box::new(Node::new('a', Some(WordData::new("Aba".to_string(), 608)))),
         );
 
         // (A) fourth level
         node = node.children.get_mut(&'a').unwrap();
         node.children.insert(
             'g',
-            Box::new(TrieNode::new(
-                'g',
-                Some(WordData::new("Abag".to_string(), 704)),
-            )),
+            Box::new(Node::new('g', Some(WordData::new("Abag".to_string(), 704)))),
         );
 
         // (A) third level
@@ -398,10 +352,7 @@ mod tests {
         node = node.children.get_mut(&'b').unwrap();
         node.children.insert(
             'e',
-            Box::new(TrieNode::new(
-                'e',
-                Some(WordData::new("Abe".to_string(), 300)),
-            )),
+            Box::new(Node::new('e', Some(WordData::new("Abe".to_string(), 300)))),
         );
 
         // (A) third level
@@ -410,61 +361,44 @@ mod tests {
         node = node.children.get_mut(&'-').unwrap();
         node.children.insert(
             'b',
-            Box::new(TrieNode::new(
-                'b',
-                Some(WordData::new("A-b".to_string(), 23)),
-            )),
+            Box::new(Node::new('b', Some(WordData::new("A-b".to_string(), 23)))),
         );
 
         // (B) first level
         node = &mut expected_trie.root;
-        node.children
-            .insert('b', Box::new(TrieNode::new('b', None)));
+        node.children.insert('b', Box::new(Node::new('b', None)));
 
         // (B) second level
         node = node.children.get_mut(&'b').unwrap();
         node.children.insert(
             'a',
-            Box::new(TrieNode::new('a', Some(WordData::new("Ba".to_string(), 5)))),
+            Box::new(Node::new('a', Some(WordData::new("Ba".to_string(), 5)))),
         );
         node.children.insert(
             'e',
-            Box::new(TrieNode::new(
-                'e',
-                Some(WordData::new("Be".to_string(), 50)),
-            )),
+            Box::new(Node::new('e', Some(WordData::new("Be".to_string(), 50)))),
         );
         node.children.insert(
             'c',
-            Box::new(TrieNode::new(
-                'c',
-                Some(WordData::new("Bc".to_string(), 50)),
-            )),
+            Box::new(Node::new('c', Some(WordData::new("Bc".to_string(), 50)))),
         );
 
         // (B) third level
         node = node.children.get_mut(&'a').unwrap();
         node.children.insert(
             'h',
-            Box::new(TrieNode::new(
-                'h',
-                Some(WordData::new("Bah".to_string(), 5)),
-            )),
+            Box::new(Node::new('h', Some(WordData::new("Bah".to_string(), 5)))),
         );
 
         // (C) first level
         node = &mut expected_trie.root;
-        node.children
-            .insert('c', Box::new(TrieNode::new('c', None)));
+        node.children.insert('c', Box::new(Node::new('c', None)));
 
         // (C) second level
         node = node.children.get_mut(&'c').unwrap();
         node.children.insert(
             'a',
-            Box::new(TrieNode::new(
-                'a',
-                Some(WordData::new("Ca".to_string(), 150)),
-            )),
+            Box::new(Node::new('a', Some(WordData::new("Ca".to_string(), 150)))),
         );
 
         expected_trie
@@ -472,41 +406,32 @@ mod tests {
 
     fn increase_popularity_testing_trie() -> Trie {
         let mut expected_trie = Trie {
-            root: Box::new(TrieNode::new(' ', None)),
+            root: Box::new(Node::new(' ', None)),
             suggestion_number: 10,
         };
 
-        let mut node: &mut Box<TrieNode> = &mut expected_trie.root;
+        let mut node: &mut Box<Node> = &mut expected_trie.root;
 
         // (A) first level
-        node.children
-            .insert('a', Box::new(TrieNode::new('a', None)));
+        node.children.insert('a', Box::new(Node::new('a', None)));
 
         // (A) second level
         node = node.children.get_mut(&'a').unwrap();
-        node.children
-            .insert('a', Box::new(TrieNode::new('a', None)));
-        node.children
-            .insert('b', Box::new(TrieNode::new('b', None)));
+        node.children.insert('a', Box::new(Node::new('a', None)));
+        node.children.insert('b', Box::new(Node::new('b', None)));
 
         // (A) third level
         node = node.children.get_mut(&'a').unwrap();
         node.children.insert(
             'r',
-            Box::new(TrieNode::new(
-                'r',
-                Some(WordData::new("Aar".to_string(), 361)),
-            )),
+            Box::new(Node::new('r', Some(WordData::new("Aar".to_string(), 361)))),
         );
 
         // (A) fourth level
         node = node.children.get_mut(&'r').unwrap();
         node.children.insert(
             'i',
-            Box::new(TrieNode::new(
-                'i',
-                Some(WordData::new("Aari".to_string(), 151)),
-            )),
+            Box::new(Node::new('i', Some(WordData::new("Aari".to_string(), 151)))),
         );
 
         // (A) third level
@@ -515,20 +440,14 @@ mod tests {
         node = node.children.get_mut(&'b').unwrap();
         node.children.insert(
             'a',
-            Box::new(TrieNode::new(
-                'a',
-                Some(WordData::new("Aba".to_string(), 608)),
-            )),
+            Box::new(Node::new('a', Some(WordData::new("Aba".to_string(), 608)))),
         );
 
         // (A) fourth level
         node = node.children.get_mut(&'a').unwrap();
         node.children.insert(
             'g',
-            Box::new(TrieNode::new(
-                'g',
-                Some(WordData::new("Abag".to_string(), 704)),
-            )),
+            Box::new(Node::new('g', Some(WordData::new("Abag".to_string(), 704)))),
         );
 
         // (A) third level
@@ -537,46 +456,33 @@ mod tests {
         node = node.children.get_mut(&'b').unwrap();
         node.children.insert(
             'e',
-            Box::new(TrieNode::new(
-                'e',
-                Some(WordData::new("Abe".to_string(), 301)),
-            )),
+            Box::new(Node::new('e', Some(WordData::new("Abe".to_string(), 301)))),
         );
 
         // (B) first level
         node = &mut expected_trie.root;
-        node.children
-            .insert('b', Box::new(TrieNode::new('b', None)));
+        node.children.insert('b', Box::new(Node::new('b', None)));
 
         // (B) second level
         node = node.children.get_mut(&'b').unwrap();
         node.children.insert(
             'a',
-            Box::new(TrieNode::new('a', Some(WordData::new("Ba".to_string(), 5)))),
+            Box::new(Node::new('a', Some(WordData::new("Ba".to_string(), 5)))),
         );
         node.children.insert(
             'e',
-            Box::new(TrieNode::new(
-                'e',
-                Some(WordData::new("Be".to_string(), 50)),
-            )),
+            Box::new(Node::new('e', Some(WordData::new("Be".to_string(), 50)))),
         );
         node.children.insert(
             'c',
-            Box::new(TrieNode::new(
-                'c',
-                Some(WordData::new("Bc".to_string(), 50)),
-            )),
+            Box::new(Node::new('c', Some(WordData::new("Bc".to_string(), 50)))),
         );
 
         // (B) third level
         node = node.children.get_mut(&'a').unwrap();
         node.children.insert(
             'h',
-            Box::new(TrieNode::new(
-                'h',
-                Some(WordData::new("Bah".to_string(), 5)),
-            )),
+            Box::new(Node::new('h', Some(WordData::new("Bah".to_string(), 5)))),
         );
 
         expected_trie
