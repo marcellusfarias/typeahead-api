@@ -1,5 +1,3 @@
-use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
 use std::collections::HashMap;
 
 // all methodos should return a RESULT. Need to remove unwraps from them
@@ -40,12 +38,12 @@ fn convert_to_pascal_case(prefix: String) -> String {
         return prefix;
     }
 
-    let mut handled_prefix = String::new();
+    let mut converted_prefix = String::new();
     for char in prefix.chars() {
-        handled_prefix.push(char.to_ascii_lowercase());
+        converted_prefix.push(char.to_ascii_lowercase());
     }
 
-    let mut v: Vec<char> = handled_prefix.chars().collect();
+    let mut v: Vec<char> = converted_prefix.chars().collect();
     v[0] = v[0].to_uppercase().nth(0).unwrap();
     let handled_prefix: String = v.into_iter().collect();
 
@@ -166,19 +164,17 @@ impl TrieNode {
 
 #[cfg(test)]
 mod tests {
-    use serde::__private::de;
-
     use super::*;
 
     fn compare_tries(root_a: &Box<TrieNode>, root_b: &Box<TrieNode>) -> bool {
         //two comparisons because order can change.
-        let is_b_equal_a = recursive_compare_nodes(root_a, root_b);
-        let is_a_equal_b = recursive_compare_nodes(root_b, root_a);
+        let is_b_equal_a = recursively_compare_tries(root_a, root_b);
+        let is_a_equal_b = recursively_compare_tries(root_b, root_a);
 
         is_b_equal_a && is_a_equal_b
     }
 
-    fn recursive_compare_nodes(node_a: &Box<TrieNode>, node_b: &Box<TrieNode>) -> bool {
+    fn recursively_compare_tries(node_a: &Box<TrieNode>, node_b: &Box<TrieNode>) -> bool {
         let mut return_value = true;
 
         if node_a.letter != node_b.letter || node_a.value != node_b.value {
@@ -270,6 +266,11 @@ mod tests {
         node.children
             .insert('c', Box::new(TrieNode::new('c', Some(50))));
 
+        // (B) third level
+        node = node.children.get_mut(&'a').unwrap();
+        node.children
+            .insert('h', Box::new(TrieNode::new('h', Some(5))));
+
         expected_trie
     }
 
@@ -340,7 +341,7 @@ mod tests {
     #[test]
     fn t_initialize() {
         let file_content =
-            "{\"Aar\":361,\"Aari\":151,\"Aba\":608,\"Abag\":704, \"Abe\": 300, \"Ba\": 5, \"Be\": 50, \"Bc\": 50}";
+            "{\"Aar\":361,\"Aari\":151,\"Aba\":608,\"Abag\":704, \"Abe\": 300, \"Ba\": 5, \"Bah\": 5, \"Be\": 50, \"Bc\": 50}";
         let trie = Trie::initialize(file_content, 10);
 
         let expected_trie = initialize_testing_trie();
@@ -450,6 +451,22 @@ mod tests {
 
         let expected_words: Vec<(String, u16)> =
             vec![("Aar".to_string(), 361), ("Aari".to_string(), 151)];
+
+        assert_eq!(expected_words, words);
+    }
+
+    #[test]
+    fn t_search_with_prefix_testing_ordering() {
+        let mut trie = initialize_testing_trie();
+        trie.suggestion_number = 4;
+        let words = trie.search_words_match_prefix("b".to_string());
+
+        let expected_words: Vec<(String, u16)> = vec![
+            ("Bc".to_string(), 50),
+            ("Be".to_string(), 50),
+            ("Ba".to_string(), 5),
+            ("Bah".to_string(), 5),
+        ];
 
         assert_eq!(expected_words, words);
     }
