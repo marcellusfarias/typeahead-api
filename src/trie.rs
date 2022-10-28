@@ -1,12 +1,14 @@
+use actix_web::App;
+
 use crate::app_error::AppError;
 use std::collections::HashMap;
 
 // all methodos should return a RESULT. Need to remove unwraps from them
 trait ITrie {
-    fn initialize(file_content: &str, suggestion_number: u8) -> Trie;
-    fn insert_word(&mut self, word: String, popularity: u16);
+    fn initialize(file_content: &str, suggestion_number: u8) -> Result<Trie, AppError>;
+    fn insert_word(&mut self, word: String, popularity: u16) -> Result<(), AppError>;
     fn increase_popularity(&mut self, word: String) -> Result<WordData, AppError>;
-    fn get_typeahead_words(&self, prefix: String) -> Vec<WordData>;
+    fn get_typeahead_words(&self, prefix: String) -> Result<Vec<WordData>, AppError>;
 }
 
 #[derive(Debug, Clone)]
@@ -28,22 +30,23 @@ impl Trie {
 }
 
 impl ITrie for Trie {
-    fn initialize(file_content: &str, suggestion_number: u8) -> Trie {
+    fn initialize(file_content: &str, suggestion_number: u8) -> Result<Trie, AppError> {
         let mut trie = Trie {
             root: Box::new(TrieNode::new(' ', None)),
             suggestion_number,
         };
 
-        let values: HashMap<String, u16> = serde_json::from_str(file_content).unwrap();
+        let values: HashMap<String, u16> =
+            serde_json::from_str(file_content).map_err(|_e| AppError::InvalidFileContent)?;
 
         for (word, popularity) in values {
-            trie.insert_word(word, popularity);
+            trie.insert_word(word, popularity)?;
         }
 
-        trie
+        Ok(trie)
     }
 
-    fn insert_word(&mut self, word: String, popularity: u16) {
+    fn insert_word(&mut self, word: String, popularity: u16) -> Result<(), AppError> {
         let mut node = &mut self.root;
         let lowercase_word = word.clone().to_ascii_lowercase();
 
@@ -53,10 +56,15 @@ impl ITrie for Trie {
                 node.children.insert(char, new_node);
             }
 
-            node = node.children.get_mut(&char).unwrap();
+            node = node
+                .children
+                .get_mut(&char)
+                .ok_or(AppError::UnexpectedError)?;
         }
 
         node.word_data = Some(WordData::new(word, popularity));
+
+        Ok(())
     }
 
     fn increase_popularity(&mut self, word: String) -> Result<WordData, AppError> {
@@ -82,12 +90,16 @@ impl ITrie for Trie {
     //[ok] always leaving the exact match (a name that is exactly the received prefix) at the beginning if there is one
     //[ok] If the prefix segment of the path is not given or it's empty, it returns the SUGGESTION_NUMBER names with the highest popularity.
     //[ok] handle case sensitive
-    fn get_typeahead_words(&self, prefix: String) -> Vec<WordData> {
+    fn get_typeahead_words(&self, prefix: String) -> Result<Vec<WordData>, AppError> {
         let mut node = &self.root;
         let prefix = prefix.to_ascii_lowercase();
 
         for char in prefix.chars() {
-            node = node.children.get(&char).unwrap();
+            if let Some(new_node) = node.children.get(&char) {
+                node = new_node;
+            } else {
+                return Ok(Vec::new()); //if there is not a single word that starts with the prefix.
+            }
         }
 
         let mut words_with_same_prefix: Vec<WordData> = Vec::new();
@@ -111,7 +123,7 @@ impl ITrie for Trie {
         //return only SUGGESTION_NUMBER items
         words_with_same_prefix.truncate(self.suggestion_number.into());
 
-        words_with_same_prefix
+        Ok(words_with_same_prefix)
     }
 }
 
@@ -209,6 +221,8 @@ mod tests {
             .insert('a', Box::new(TrieNode::new('a', None)));
         node.children
             .insert('b', Box::new(TrieNode::new('b', None)));
+        node.children
+            .insert('-', Box::new(TrieNode::new('-', None)));
 
         // (A) third level
         node = node.children.get_mut(&'a').unwrap();
@@ -264,6 +278,18 @@ mod tests {
             )),
         );
 
+        // (A) third level
+        node = &mut expected_trie.root;
+        node = node.children.get_mut(&'a').unwrap();
+        node = node.children.get_mut(&'-').unwrap();
+        node.children.insert(
+            'b',
+            Box::new(TrieNode::new(
+                'b',
+                Some(WordData::new("A-b".to_string(), 23)),
+            )),
+        );
+
         // (B) first level
         node = &mut expected_trie.root;
         node.children
@@ -297,6 +323,147 @@ mod tests {
             Box::new(TrieNode::new(
                 'h',
                 Some(WordData::new("Bah".to_string(), 5)),
+            )),
+        );
+
+        expected_trie
+    }
+
+    fn insert_word_testing_trie() -> Trie {
+        let mut expected_trie = Trie {
+            root: Box::new(TrieNode::new(' ', None)),
+            suggestion_number: 10,
+        };
+
+        let mut node: &mut Box<TrieNode> = &mut expected_trie.root;
+
+        // (A) first level
+        node.children
+            .insert('a', Box::new(TrieNode::new('a', None)));
+
+        // (A) second level
+        node = node.children.get_mut(&'a').unwrap();
+        node.children
+            .insert('a', Box::new(TrieNode::new('a', None)));
+        node.children
+            .insert('b', Box::new(TrieNode::new('b', None)));
+        node.children
+            .insert('-', Box::new(TrieNode::new('-', None)));
+
+        // (A) third level
+        node = node.children.get_mut(&'a').unwrap();
+        node.children.insert(
+            'r',
+            Box::new(TrieNode::new(
+                'r',
+                Some(WordData::new("Aar".to_string(), 361)),
+            )),
+        );
+
+        // (A) fourth level
+        node = node.children.get_mut(&'r').unwrap();
+        node.children.insert(
+            'i',
+            Box::new(TrieNode::new(
+                'i',
+                Some(WordData::new("Aari".to_string(), 151)),
+            )),
+        );
+
+        // (A) third level
+        node = &mut expected_trie.root;
+        node = node.children.get_mut(&'a').unwrap();
+        node = node.children.get_mut(&'b').unwrap();
+        node.children.insert(
+            'a',
+            Box::new(TrieNode::new(
+                'a',
+                Some(WordData::new("Aba".to_string(), 608)),
+            )),
+        );
+
+        // (A) fourth level
+        node = node.children.get_mut(&'a').unwrap();
+        node.children.insert(
+            'g',
+            Box::new(TrieNode::new(
+                'g',
+                Some(WordData::new("Abag".to_string(), 704)),
+            )),
+        );
+
+        // (A) third level
+        node = &mut expected_trie.root;
+        node = node.children.get_mut(&'a').unwrap();
+        node = node.children.get_mut(&'b').unwrap();
+        node.children.insert(
+            'e',
+            Box::new(TrieNode::new(
+                'e',
+                Some(WordData::new("Abe".to_string(), 300)),
+            )),
+        );
+
+        // (A) third level
+        node = &mut expected_trie.root;
+        node = node.children.get_mut(&'a').unwrap();
+        node = node.children.get_mut(&'-').unwrap();
+        node.children.insert(
+            'b',
+            Box::new(TrieNode::new(
+                'b',
+                Some(WordData::new("A-b".to_string(), 23)),
+            )),
+        );
+
+        // (B) first level
+        node = &mut expected_trie.root;
+        node.children
+            .insert('b', Box::new(TrieNode::new('b', None)));
+
+        // (B) second level
+        node = node.children.get_mut(&'b').unwrap();
+        node.children.insert(
+            'a',
+            Box::new(TrieNode::new('a', Some(WordData::new("Ba".to_string(), 5)))),
+        );
+        node.children.insert(
+            'e',
+            Box::new(TrieNode::new(
+                'e',
+                Some(WordData::new("Be".to_string(), 50)),
+            )),
+        );
+        node.children.insert(
+            'c',
+            Box::new(TrieNode::new(
+                'c',
+                Some(WordData::new("Bc".to_string(), 50)),
+            )),
+        );
+
+        // (B) third level
+        node = node.children.get_mut(&'a').unwrap();
+        node.children.insert(
+            'h',
+            Box::new(TrieNode::new(
+                'h',
+                Some(WordData::new("Bah".to_string(), 5)),
+            )),
+        );
+
+        // (C) first level
+        node = &mut expected_trie.root;
+        node.children
+            .insert('c', Box::new(TrieNode::new('c', None)));
+
+        // (C) second level
+        node = node.children.get_mut(&'c').unwrap();
+        node.children.insert(
+            'a',
+            Box::new(TrieNode::new(
+                'a',
+                Some(WordData::new("Ca".to_string(), 150)),
             )),
         );
 
@@ -416,10 +583,10 @@ mod tests {
     }
 
     #[test]
-    fn t_initialize() {
+    fn t_initialize_valid_file_content() {
         let file_content =
-            "{\"Aar\":361,\"Aari\":151,\"Aba\":608,\"Abag\":704, \"Abe\": 300, \"Ba\": 5, \"Bah\": 5, \"Be\": 50, \"Bc\": 50}";
-        let trie = Trie::initialize(file_content, 10);
+            "{\"A-b\": 23, \"Aar\":361,\"Aari\":151,\"Aba\":608,\"Abag\":704, \"Abe\": 300, \"Ba\": 5, \"Bah\": 5, \"Be\": 50, \"Bc\": 50}";
+        let trie = Trie::initialize(file_content, 10).unwrap();
 
         let expected_trie = initialize_testing_trie();
 
@@ -430,14 +597,34 @@ mod tests {
     }
 
     #[test]
-    fn t_insert_word_into_db() {}
+    fn t_initialize_invalid_file_content() {
+        let file_content = "";
+        let error = Trie::initialize(file_content, 10).unwrap_err();
+
+        assert_eq!(error, AppError::InvalidFileContent);
+    }
 
     #[test]
-    fn t_increase_popularity() {
+    fn t_insert_word_ok() {
+        let mut trie = initialize_testing_trie();
+        let word = "Ca".to_string();
+        let popularity = 150;
+        trie.insert_word(word, popularity).unwrap();
+
+        let expected_trie = insert_word_testing_trie();
+
+        print_trie(&trie.root, 0);
+        print_trie(&expected_trie.root, 0);
+
+        assert!(compare_tries(&expected_trie.root, &trie.root));
+    }
+
+    #[test]
+    fn t_increase_popularity_word_exists() {
         let file_content =
         "{\"Aar\":361,\"Aari\":151,\"Aba\":608,\"Abag\":704, \"Abe\": 300, \"Ba\": 5, \"Bah\": 5, \"Be\": 50, \"Bc\": 50}";
-        let mut trie = Trie::initialize(file_content, 10);
-        let _result = trie.increase_popularity("Abe".to_string());
+        let mut trie = Trie::initialize(file_content, 10).unwrap();
+        let _result = trie.increase_popularity("Abe".to_string()).unwrap();
 
         let expected_trie = increase_popularity_testing_trie();
 
@@ -448,10 +635,20 @@ mod tests {
     }
 
     #[test]
-    fn t_search_with_prefix_prefix_not_included() {
+    fn t_increase_popularity_word_does_not_exist() {
+        let file_content =
+        "{\"Aar\":361,\"Aari\":151,\"Aba\":608,\"Abag\":704, \"Abe\": 300, \"Ba\": 5, \"Bah\": 5, \"Be\": 50, \"Bc\": 50}";
+        let mut trie = Trie::initialize(file_content, 10).unwrap();
+        let error = trie.increase_popularity("Abcd".to_string()).unwrap_err();
+
+        assert_eq!(error, AppError::WordDoesNotExist);
+    }
+
+    #[test]
+    fn t_get_typeahead_words_prefix_not_included() {
         let trie = initialize_testing_trie();
 
-        let words = trie.get_typeahead_words("Ab".to_string());
+        let words = trie.get_typeahead_words("Ab".to_string()).unwrap();
 
         let expected_words: Vec<WordData> = vec![
             WordData::new("Abag".to_string(), 704),
@@ -463,10 +660,10 @@ mod tests {
     }
 
     #[test]
-    fn t_search_with_prefix_exact_match_prefix() {
+    fn t_get_typeahead_words_exact_match_prefix() {
         let trie = initialize_testing_trie();
 
-        let words = trie.get_typeahead_words("Aba".to_string());
+        let words = trie.get_typeahead_words("Aba".to_string()).unwrap();
 
         let expected_words: Vec<WordData> = vec![
             WordData::new("Aba".to_string(), 608),
@@ -477,10 +674,10 @@ mod tests {
     }
 
     #[test]
-    fn t_search_with_prefix_take_two() {
+    fn t_get_typeahead_words_more_words_than_suggestion_number() {
         let mut trie = initialize_testing_trie();
         trie.suggestion_number = 2;
-        let words = trie.get_typeahead_words("Ab".to_string());
+        let words = trie.get_typeahead_words("Ab".to_string()).unwrap();
 
         let expected_words: Vec<WordData> = vec![
             WordData::new("Abag".to_string(), 704),
@@ -491,10 +688,25 @@ mod tests {
     }
 
     #[test]
-    fn t_search_with_prefix_empty_prefix() {
+    fn t_get_typeahead_words_less_words_than_suggestion_number() {
+        let mut trie = initialize_testing_trie();
+        trie.suggestion_number = 10;
+        let words = trie.get_typeahead_words("Ab".to_string()).unwrap();
+
+        let expected_words: Vec<WordData> = vec![
+            WordData::new("Abag".to_string(), 704),
+            WordData::new("Aba".to_string(), 608),
+            WordData::new("Abe".to_string(), 300),
+        ];
+
+        assert_eq!(expected_words, words);
+    }
+
+    #[test]
+    fn t_get_typeahead_words_empty_prefix() {
         let mut trie = initialize_testing_trie();
         trie.suggestion_number = 3;
-        let words = trie.get_typeahead_words("".to_string());
+        let words = trie.get_typeahead_words("".to_string()).unwrap();
 
         let expected_words: Vec<WordData> = vec![
             WordData::new("Abag".to_string(), 704),
@@ -506,10 +718,10 @@ mod tests {
     }
 
     #[test]
-    fn t_search_with_prefix_same_value() {
+    fn t_get_typeahead_words_tied_words() {
         let mut trie = initialize_testing_trie();
         trie.suggestion_number = 2;
-        let words = trie.get_typeahead_words("B".to_string());
+        let words = trie.get_typeahead_words("B".to_string()).unwrap();
 
         let expected_words: Vec<WordData> = vec![
             WordData::new("Bc".to_string(), 50),
@@ -520,10 +732,10 @@ mod tests {
     }
 
     #[test]
-    fn t_search_with_prefix_case_insensitive() {
+    fn t_get_typeahead_words_case_insensitive() {
         let mut trie = initialize_testing_trie();
         trie.suggestion_number = 2;
-        let words = trie.get_typeahead_words("b".to_string());
+        let words = trie.get_typeahead_words("b".to_string()).unwrap();
 
         let expected_words: Vec<WordData> = vec![
             WordData::new("Bc".to_string(), 50),
@@ -532,7 +744,7 @@ mod tests {
 
         assert_eq!(expected_words, words);
 
-        let words = trie.get_typeahead_words("AA".to_string());
+        let words = trie.get_typeahead_words("AA".to_string()).unwrap();
 
         let expected_words: Vec<WordData> = vec![
             WordData::new("Aar".to_string(), 361),
@@ -543,10 +755,10 @@ mod tests {
     }
 
     #[test]
-    fn t_search_with_prefix_testing_ordering() {
+    fn t_get_typeahead_words_testing_ordering() {
         let mut trie = initialize_testing_trie();
         trie.suggestion_number = 4;
-        let words = trie.get_typeahead_words("b".to_string());
+        let words = trie.get_typeahead_words("b".to_string()).unwrap();
 
         let expected_words: Vec<WordData> = vec![
             WordData::new("Bc".to_string(), 50),
@@ -554,6 +766,39 @@ mod tests {
             WordData::new("Ba".to_string(), 5),
             WordData::new("Bah".to_string(), 5),
         ];
+
+        assert_eq!(expected_words, words);
+    }
+
+    #[test]
+    fn t_get_typeahead_words_no_word_matches_prefix() {
+        let mut trie = initialize_testing_trie();
+        trie.suggestion_number = 4;
+        let words = trie.get_typeahead_words("Brazil".to_string()).unwrap();
+
+        let expected_words: Vec<WordData> = vec![];
+
+        assert_eq!(expected_words, words);
+    }
+
+    #[test]
+    fn t_get_typeahead_words_return_only_prefix() {
+        let mut trie = initialize_testing_trie();
+        trie.suggestion_number = 4;
+        let words = trie.get_typeahead_words("Bah".to_string()).unwrap();
+
+        let expected_words: Vec<WordData> = vec![WordData::new("Bah".to_string(), 5)];
+
+        assert_eq!(expected_words, words);
+    }
+
+    #[test]
+    fn t_get_typeahead_words_prefix_with_special_characters() {
+        let mut trie = initialize_testing_trie();
+        trie.suggestion_number = 4;
+        let words = trie.get_typeahead_words("A-".to_string()).unwrap();
+
+        let expected_words: Vec<WordData> = vec![WordData::new("A-b".to_string(), 23)];
 
         assert_eq!(expected_words, words);
     }

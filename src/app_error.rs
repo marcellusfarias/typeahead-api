@@ -5,10 +5,12 @@ use derive_more::{Display, Error};
 
 #[derive(Debug, Display, Error, PartialEq, Eq)]
 pub enum AppError {
-    #[display(fmt = "Source file does not exist.")]
-    FileDoesNotExist,
+    #[display(fmt = "Source file has invalid content.")]
+    InvalidFileContent,
     #[display(fmt = "Word does not exist.")]
     WordDoesNotExist,
+    #[display(fmt = "Unexpected internal error.")]
+    UnexpectedError,
 }
 
 impl error::ResponseError for AppError {
@@ -18,7 +20,9 @@ impl error::ResponseError for AppError {
 
     fn status_code(&self) -> StatusCode {
         match *self {
-            AppError::FileDoesNotExist => StatusCode::INTERNAL_SERVER_ERROR,
+            AppError::InvalidFileContent | AppError::UnexpectedError => {
+                StatusCode::INTERNAL_SERVER_ERROR
+            }
             AppError::WordDoesNotExist => StatusCode::BAD_REQUEST,
         }
     }
