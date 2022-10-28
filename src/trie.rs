@@ -1,11 +1,12 @@
+use crate::app_error::AppError;
 use std::collections::HashMap;
 
 // all methodos should return a RESULT. Need to remove unwraps from them
 trait ITrie {
     fn initialize(file_content: &str, suggestion_number: u8) -> Trie;
     fn insert_word(&mut self, word: String, popularity: u16);
-    fn increase_popularity(&mut self, word: String);
-    fn search_words_match_prefix(&self, prefix: String) -> Vec<(String, u16)>;
+    fn increase_popularity(&mut self, word: String) -> Result<WordData, AppError>;
+    fn get_typeahead_words(&self, prefix: String) -> Vec<WordData>;
 }
 
 #[derive(Debug, Clone)]
@@ -15,39 +16,15 @@ pub struct Trie {
 }
 
 impl Trie {
-    fn get_words_with_same_prefix(
-        prefix_node: &Box<TrieNode>,
-        prefix: String,
-        result_vec: &mut Vec<(String, u16)>,
-    ) {
-        for (letter, child_node) in &prefix_node.children {
-            let mut new_word = prefix.clone();
-            new_word.push(*letter);
-
-            if let Some(value) = child_node.value {
-                result_vec.push((new_word.clone(), value));
+    fn get_words_with_same_prefix(prefix_node: &Box<TrieNode>, result_vec: &mut Vec<WordData>) {
+        for (_letter, child_node) in &prefix_node.children {
+            if let Some(word_data) = child_node.word_data.clone() {
+                result_vec.push(word_data);
             }
 
-            Trie::get_words_with_same_prefix(child_node, new_word, result_vec);
+            Trie::get_words_with_same_prefix(child_node, result_vec);
         }
     }
-}
-
-fn convert_to_pascal_case(prefix: String) -> String {
-    if prefix.is_empty() {
-        return prefix;
-    }
-
-    let mut converted_prefix = String::new();
-    for char in prefix.chars() {
-        converted_prefix.push(char.to_ascii_lowercase());
-    }
-
-    let mut v: Vec<char> = converted_prefix.chars().collect();
-    v[0] = v[0].to_uppercase().nth(0).unwrap();
-    let handled_prefix: String = v.into_iter().collect();
-
-    handled_prefix
 }
 
 impl ITrie for Trie {
@@ -68,34 +45,36 @@ impl ITrie for Trie {
 
     fn insert_word(&mut self, word: String, popularity: u16) {
         let mut node = &mut self.root;
-        let len = word.len();
-        let mut i = 0;
+        let lowercase_word = word.clone().to_ascii_lowercase();
 
-        for char in word.chars() {
+        for char in lowercase_word.chars() {
             if !node.children.contains_key(&char) {
-                let value = if i == len - 1 { Some(popularity) } else { None };
-                let new_node = Box::new(TrieNode::new(char.clone(), value));
+                let new_node = Box::new(TrieNode::new(char.clone(), None));
                 node.children.insert(char, new_node);
             }
 
             node = node.children.get_mut(&char).unwrap();
-
-            if i == len - 1 {
-                node.value = Some(popularity)
-            }
-
-            i = i + 1;
         }
+
+        node.word_data = Some(WordData::new(word, popularity));
     }
 
-    fn increase_popularity(&mut self, word: String) {
+    fn increase_popularity(&mut self, word: String) -> Result<WordData, AppError> {
         let mut node = &mut self.root;
+        let lowercase_word = word.clone().to_ascii_lowercase();
 
-        for char in word.chars() {
-            node = node.children.get_mut(&char).unwrap();
+        for char in lowercase_word.chars() {
+            node = node
+                .children
+                .get_mut(&char)
+                .ok_or(AppError::WordDoesNotExist)?;
         }
 
-        node.value = Some(node.value.unwrap_or(0) + 1);
+        let mut updated_word_data = node.word_data.clone().ok_or(AppError::WordDoesNotExist)?;
+        updated_word_data.popularity = updated_word_data.popularity + 1;
+        node.word_data = Some(updated_word_data.clone());
+
+        Ok(updated_word_data)
     }
 
     //[ok] order by value and return SUGGESTION_NUMBER items
@@ -103,45 +82,50 @@ impl ITrie for Trie {
     //[ok] always leaving the exact match (a name that is exactly the received prefix) at the beginning if there is one
     //[ok] If the prefix segment of the path is not given or it's empty, it returns the SUGGESTION_NUMBER names with the highest popularity.
     //[ok] handle case sensitive
-    fn search_words_match_prefix(&self, prefix: String) -> Vec<(String, u16)> {
+    fn get_typeahead_words(&self, prefix: String) -> Vec<WordData> {
         let mut node = &self.root;
-        let suggestion_number: usize = self.suggestion_number.into();
-        let prefix = convert_to_pascal_case(prefix);
+        let prefix = prefix.to_ascii_lowercase();
 
         for char in prefix.chars() {
             node = node.children.get(&char).unwrap();
         }
 
-        let mut words_with_same_prefix: Vec<(String, u16)> = Vec::new();
-        let mut word_match_exact_prefix: (String, u16) = ("".to_string(), 0); //exact match always needs to be at index 0
-        if let Some(value) = node.value {
-            word_match_exact_prefix = (prefix.clone(), value);
-            words_with_same_prefix.push(word_match_exact_prefix.clone());
-        }
+        let mut words_with_same_prefix: Vec<WordData> = Vec::new();
+        let prefix_word_data: Option<WordData> = node.word_data.clone();
 
-        Trie::get_words_with_same_prefix(node, prefix, &mut words_with_same_prefix);
-        if !word_match_exact_prefix.0.is_empty() {
-            //using swap_remove because it's O(1)... instead of using remove with O(n).
-            words_with_same_prefix.swap_remove(
-                words_with_same_prefix
-                    .iter()
-                    .position(|x| *x == word_match_exact_prefix)
-                    .unwrap(),
-            );
-        }
+        Trie::get_words_with_same_prefix(node, &mut words_with_same_prefix);
 
-        words_with_same_prefix.sort_by(|(name_one, score_one), (name_two, score_two)| {
-            score_two.cmp(score_one).then(name_one.cmp(name_two))
+        //order by popularity desc and then by word asc
+        words_with_same_prefix.sort_by(|word_data_one, word_data_two| {
+            word_data_two
+                .popularity
+                .cmp(&word_data_one.popularity)
+                .then(word_data_one.word.cmp(&word_data_two.word))
         });
 
-        if !word_match_exact_prefix.0.is_empty() {
-            //insert word that match prefix at first position
-            words_with_same_prefix.splice(0..0, vec![word_match_exact_prefix].iter().cloned());
+        //insert word that match prefix at first position
+        if let Some(word_data) = prefix_word_data {
+            words_with_same_prefix.splice(0..0, vec![word_data].iter().cloned());
         }
 
-        words_with_same_prefix.truncate(suggestion_number);
+        //return only SUGGESTION_NUMBER items
+        words_with_same_prefix.truncate(self.suggestion_number.into());
 
         words_with_same_prefix
+    }
+}
+
+//storing the word in the node so we can work with lowercase all over the way avoiding case insensitive problems.
+//assuming we can't have 2 same words but with different casing. E.g., Rose-Marie and Rose-marie
+#[derive(Debug, Clone, PartialEq)]
+pub struct WordData {
+    pub word: String,
+    pub popularity: u16,
+}
+
+impl WordData {
+    pub fn new(word: String, popularity: u16) -> WordData {
+        WordData { word, popularity }
     }
 }
 
@@ -149,15 +133,15 @@ impl ITrie for Trie {
 pub struct TrieNode {
     pub children: HashMap<char, Box<TrieNode>>,
     pub letter: char,
-    pub value: Option<u16>,
+    pub word_data: Option<WordData>,
 }
 
 impl TrieNode {
-    pub fn new(letter: char, value: Option<u16>) -> TrieNode {
+    pub fn new(letter: char, word_data: Option<WordData>) -> TrieNode {
         TrieNode {
             children: HashMap::new(),
             letter,
-            value,
+            word_data,
         }
     }
 }
@@ -168,7 +152,10 @@ mod tests {
 
     fn compare_tries(root_a: &Box<TrieNode>, root_b: &Box<TrieNode>) -> bool {
         //two comparisons because order can change.
+        println!("Comparing b to a");
         let is_b_equal_a = recursively_compare_tries(root_a, root_b);
+
+        println!("Comparing a to b");
         let is_a_equal_b = recursively_compare_tries(root_b, root_a);
 
         is_b_equal_a && is_a_equal_b
@@ -177,7 +164,7 @@ mod tests {
     fn recursively_compare_tries(node_a: &Box<TrieNode>, node_b: &Box<TrieNode>) -> bool {
         let mut return_value = true;
 
-        if node_a.letter != node_b.letter || node_a.value != node_b.value {
+        if node_a.letter != node_b.letter || node_a.word_data != node_b.word_data {
             println!("node_a: {:?}, node_b: {:?}", node_a, node_b);
             return false;
         }
@@ -186,9 +173,10 @@ mod tests {
             let child_b = node_b.children.get(&child_a.0);
 
             if child_b.is_none() || return_value == false {
+                println!("child_a: {:?}, child_b: {:?}", child_a, child_b);
                 return false;
             } else {
-                return_value = compare_tries(&child_a.1, child_b.unwrap());
+                return_value = recursively_compare_tries(&child_a.1, child_b.unwrap());
             }
         }
 
@@ -196,7 +184,7 @@ mod tests {
     }
 
     fn print_trie(node: &Box<TrieNode>, mut i: u8) {
-        println!("[{}] {}-{:?}", i, node.letter, node.value);
+        println!("[{}] {}-{:?}", i, node.letter, node.word_data);
         i = i + 1;
         for child in &node.children {
             print_trie(child.1, i);
@@ -213,10 +201,10 @@ mod tests {
 
         // (A) first level
         node.children
-            .insert('A', Box::new(TrieNode::new('A', None)));
+            .insert('a', Box::new(TrieNode::new('a', None)));
 
         // (A) second level
-        node = node.children.get_mut(&'A').unwrap();
+        node = node.children.get_mut(&'a').unwrap();
         node.children
             .insert('a', Box::new(TrieNode::new('a', None)));
         node.children
@@ -224,52 +212,93 @@ mod tests {
 
         // (A) third level
         node = node.children.get_mut(&'a').unwrap();
-        node.children
-            .insert('r', Box::new(TrieNode::new('r', Some(361))));
+        node.children.insert(
+            'r',
+            Box::new(TrieNode::new(
+                'r',
+                Some(WordData::new("Aar".to_string(), 361)),
+            )),
+        );
 
         // (A) fourth level
         node = node.children.get_mut(&'r').unwrap();
-        node.children
-            .insert('i', Box::new(TrieNode::new('i', Some(151))));
+        node.children.insert(
+            'i',
+            Box::new(TrieNode::new(
+                'i',
+                Some(WordData::new("Aari".to_string(), 151)),
+            )),
+        );
 
         // (A) third level
         node = &mut expected_trie.root;
-        node = node.children.get_mut(&'A').unwrap();
+        node = node.children.get_mut(&'a').unwrap();
         node = node.children.get_mut(&'b').unwrap();
-
-        node.children
-            .insert('a', Box::new(TrieNode::new('a', Some(608))));
+        node.children.insert(
+            'a',
+            Box::new(TrieNode::new(
+                'a',
+                Some(WordData::new("Aba".to_string(), 608)),
+            )),
+        );
 
         // (A) fourth level
         node = node.children.get_mut(&'a').unwrap();
-        node.children
-            .insert('g', Box::new(TrieNode::new('g', Some(704))));
+        node.children.insert(
+            'g',
+            Box::new(TrieNode::new(
+                'g',
+                Some(WordData::new("Abag".to_string(), 704)),
+            )),
+        );
 
         // (A) third level
         node = &mut expected_trie.root;
-        node = node.children.get_mut(&'A').unwrap();
+        node = node.children.get_mut(&'a').unwrap();
         node = node.children.get_mut(&'b').unwrap();
-        node.children
-            .insert('e', Box::new(TrieNode::new('e', Some(300))));
+        node.children.insert(
+            'e',
+            Box::new(TrieNode::new(
+                'e',
+                Some(WordData::new("Abe".to_string(), 300)),
+            )),
+        );
 
         // (B) first level
         node = &mut expected_trie.root;
         node.children
-            .insert('B', Box::new(TrieNode::new('B', None)));
+            .insert('b', Box::new(TrieNode::new('b', None)));
 
         // (B) second level
-        node = node.children.get_mut(&'B').unwrap();
-        node.children
-            .insert('a', Box::new(TrieNode::new('a', Some(5))));
-        node.children
-            .insert('e', Box::new(TrieNode::new('e', Some(50))));
-        node.children
-            .insert('c', Box::new(TrieNode::new('c', Some(50))));
+        node = node.children.get_mut(&'b').unwrap();
+        node.children.insert(
+            'a',
+            Box::new(TrieNode::new('a', Some(WordData::new("Ba".to_string(), 5)))),
+        );
+        node.children.insert(
+            'e',
+            Box::new(TrieNode::new(
+                'e',
+                Some(WordData::new("Be".to_string(), 50)),
+            )),
+        );
+        node.children.insert(
+            'c',
+            Box::new(TrieNode::new(
+                'c',
+                Some(WordData::new("Bc".to_string(), 50)),
+            )),
+        );
 
         // (B) third level
         node = node.children.get_mut(&'a').unwrap();
-        node.children
-            .insert('h', Box::new(TrieNode::new('h', Some(5))));
+        node.children.insert(
+            'h',
+            Box::new(TrieNode::new(
+                'h',
+                Some(WordData::new("Bah".to_string(), 5)),
+            )),
+        );
 
         expected_trie
     }
@@ -284,10 +313,10 @@ mod tests {
 
         // (A) first level
         node.children
-            .insert('A', Box::new(TrieNode::new('A', None)));
+            .insert('a', Box::new(TrieNode::new('a', None)));
 
         // (A) second level
-        node = node.children.get_mut(&'A').unwrap();
+        node = node.children.get_mut(&'a').unwrap();
         node.children
             .insert('a', Box::new(TrieNode::new('a', None)));
         node.children
@@ -295,45 +324,93 @@ mod tests {
 
         // (A) third level
         node = node.children.get_mut(&'a').unwrap();
-        node.children
-            .insert('r', Box::new(TrieNode::new('r', Some(361))));
+        node.children.insert(
+            'r',
+            Box::new(TrieNode::new(
+                'r',
+                Some(WordData::new("Aar".to_string(), 361)),
+            )),
+        );
 
         // (A) fourth level
         node = node.children.get_mut(&'r').unwrap();
-        node.children
-            .insert('i', Box::new(TrieNode::new('i', Some(151))));
+        node.children.insert(
+            'i',
+            Box::new(TrieNode::new(
+                'i',
+                Some(WordData::new("Aari".to_string(), 151)),
+            )),
+        );
 
         // (A) third level
         node = &mut expected_trie.root;
-        node = node.children.get_mut(&'A').unwrap();
+        node = node.children.get_mut(&'a').unwrap();
         node = node.children.get_mut(&'b').unwrap();
-
-        node.children
-            .insert('a', Box::new(TrieNode::new('a', Some(608))));
+        node.children.insert(
+            'a',
+            Box::new(TrieNode::new(
+                'a',
+                Some(WordData::new("Aba".to_string(), 608)),
+            )),
+        );
 
         // (A) fourth level
         node = node.children.get_mut(&'a').unwrap();
-        node.children
-            .insert('g', Box::new(TrieNode::new('g', Some(704))));
+        node.children.insert(
+            'g',
+            Box::new(TrieNode::new(
+                'g',
+                Some(WordData::new("Abag".to_string(), 704)),
+            )),
+        );
 
         // (A) third level
         node = &mut expected_trie.root;
-        node = node.children.get_mut(&'A').unwrap();
+        node = node.children.get_mut(&'a').unwrap();
         node = node.children.get_mut(&'b').unwrap();
-        node.children
-            .insert('e', Box::new(TrieNode::new('e', Some(301))));
+        node.children.insert(
+            'e',
+            Box::new(TrieNode::new(
+                'e',
+                Some(WordData::new("Abe".to_string(), 301)),
+            )),
+        );
 
         // (B) first level
         node = &mut expected_trie.root;
         node.children
-            .insert('B', Box::new(TrieNode::new('B', None)));
+            .insert('b', Box::new(TrieNode::new('b', None)));
 
         // (B) second level
-        node = node.children.get_mut(&'B').unwrap();
-        node.children
-            .insert('a', Box::new(TrieNode::new('a', Some(5))));
-        node.children
-            .insert('e', Box::new(TrieNode::new('e', Some(50))));
+        node = node.children.get_mut(&'b').unwrap();
+        node.children.insert(
+            'a',
+            Box::new(TrieNode::new('a', Some(WordData::new("Ba".to_string(), 5)))),
+        );
+        node.children.insert(
+            'e',
+            Box::new(TrieNode::new(
+                'e',
+                Some(WordData::new("Be".to_string(), 50)),
+            )),
+        );
+        node.children.insert(
+            'c',
+            Box::new(TrieNode::new(
+                'c',
+                Some(WordData::new("Bc".to_string(), 50)),
+            )),
+        );
+
+        // (B) third level
+        node = node.children.get_mut(&'a').unwrap();
+        node.children.insert(
+            'h',
+            Box::new(TrieNode::new(
+                'h',
+                Some(WordData::new("Bah".to_string(), 5)),
+            )),
+        );
 
         expected_trie
     }
@@ -358,9 +435,9 @@ mod tests {
     #[test]
     fn t_increase_popularity() {
         let file_content =
-        "{\"Aar\":361,\"Aari\":151,\"Aba\":608,\"Abag\":704, \"Abe\": 300, \"Ba\": 5, \"Be\": 50}";
+        "{\"Aar\":361,\"Aari\":151,\"Aba\":608,\"Abag\":704, \"Abe\": 300, \"Ba\": 5, \"Bah\": 5, \"Be\": 50, \"Bc\": 50}";
         let mut trie = Trie::initialize(file_content, 10);
-        trie.increase_popularity("Abe".to_string());
+        let _result = trie.increase_popularity("Abe".to_string());
 
         let expected_trie = increase_popularity_testing_trie();
 
@@ -374,12 +451,12 @@ mod tests {
     fn t_search_with_prefix_prefix_not_included() {
         let trie = initialize_testing_trie();
 
-        let words = trie.search_words_match_prefix("Ab".to_string());
+        let words = trie.get_typeahead_words("Ab".to_string());
 
-        let expected_words: Vec<(String, u16)> = vec![
-            ("Abag".to_string(), 704),
-            ("Aba".to_string(), 608),
-            ("Abe".to_string(), 300),
+        let expected_words: Vec<WordData> = vec![
+            WordData::new("Abag".to_string(), 704),
+            WordData::new("Aba".to_string(), 608),
+            WordData::new("Abe".to_string(), 300),
         ];
 
         assert_eq!(expected_words, words);
@@ -389,10 +466,12 @@ mod tests {
     fn t_search_with_prefix_exact_match_prefix() {
         let trie = initialize_testing_trie();
 
-        let words = trie.search_words_match_prefix("Aba".to_string());
+        let words = trie.get_typeahead_words("Aba".to_string());
 
-        let expected_words: Vec<(String, u16)> =
-            vec![("Aba".to_string(), 608), ("Abag".to_string(), 704)];
+        let expected_words: Vec<WordData> = vec![
+            WordData::new("Aba".to_string(), 608),
+            WordData::new("Abag".to_string(), 704),
+        ];
 
         assert_eq!(expected_words, words);
     }
@@ -401,10 +480,12 @@ mod tests {
     fn t_search_with_prefix_take_two() {
         let mut trie = initialize_testing_trie();
         trie.suggestion_number = 2;
-        let words = trie.search_words_match_prefix("Ab".to_string());
+        let words = trie.get_typeahead_words("Ab".to_string());
 
-        let expected_words: Vec<(String, u16)> =
-            vec![("Abag".to_string(), 704), ("Aba".to_string(), 608)];
+        let expected_words: Vec<WordData> = vec![
+            WordData::new("Abag".to_string(), 704),
+            WordData::new("Aba".to_string(), 608),
+        ];
 
         assert_eq!(expected_words, words);
     }
@@ -413,12 +494,12 @@ mod tests {
     fn t_search_with_prefix_empty_prefix() {
         let mut trie = initialize_testing_trie();
         trie.suggestion_number = 3;
-        let words = trie.search_words_match_prefix("".to_string());
+        let words = trie.get_typeahead_words("".to_string());
 
-        let expected_words: Vec<(String, u16)> = vec![
-            ("Abag".to_string(), 704),
-            ("Aba".to_string(), 608),
-            ("Aar".to_string(), 361),
+        let expected_words: Vec<WordData> = vec![
+            WordData::new("Abag".to_string(), 704),
+            WordData::new("Aba".to_string(), 608),
+            WordData::new("Aar".to_string(), 361),
         ];
 
         assert_eq!(expected_words, words);
@@ -428,10 +509,12 @@ mod tests {
     fn t_search_with_prefix_same_value() {
         let mut trie = initialize_testing_trie();
         trie.suggestion_number = 2;
-        let words = trie.search_words_match_prefix("B".to_string());
+        let words = trie.get_typeahead_words("B".to_string());
 
-        let expected_words: Vec<(String, u16)> =
-            vec![("Bc".to_string(), 50), ("Be".to_string(), 50)];
+        let expected_words: Vec<WordData> = vec![
+            WordData::new("Bc".to_string(), 50),
+            WordData::new("Be".to_string(), 50),
+        ];
 
         assert_eq!(expected_words, words);
     }
@@ -440,17 +523,21 @@ mod tests {
     fn t_search_with_prefix_case_insensitive() {
         let mut trie = initialize_testing_trie();
         trie.suggestion_number = 2;
-        let words = trie.search_words_match_prefix("b".to_string());
+        let words = trie.get_typeahead_words("b".to_string());
 
-        let expected_words: Vec<(String, u16)> =
-            vec![("Bc".to_string(), 50), ("Be".to_string(), 50)];
+        let expected_words: Vec<WordData> = vec![
+            WordData::new("Bc".to_string(), 50),
+            WordData::new("Be".to_string(), 50),
+        ];
 
         assert_eq!(expected_words, words);
 
-        let words = trie.search_words_match_prefix("AA".to_string());
+        let words = trie.get_typeahead_words("AA".to_string());
 
-        let expected_words: Vec<(String, u16)> =
-            vec![("Aar".to_string(), 361), ("Aari".to_string(), 151)];
+        let expected_words: Vec<WordData> = vec![
+            WordData::new("Aar".to_string(), 361),
+            WordData::new("Aari".to_string(), 151),
+        ];
 
         assert_eq!(expected_words, words);
     }
@@ -459,13 +546,13 @@ mod tests {
     fn t_search_with_prefix_testing_ordering() {
         let mut trie = initialize_testing_trie();
         trie.suggestion_number = 4;
-        let words = trie.search_words_match_prefix("b".to_string());
+        let words = trie.get_typeahead_words("b".to_string());
 
-        let expected_words: Vec<(String, u16)> = vec![
-            ("Bc".to_string(), 50),
-            ("Be".to_string(), 50),
-            ("Ba".to_string(), 5),
-            ("Bah".to_string(), 5),
+        let expected_words: Vec<WordData> = vec![
+            WordData::new("Bc".to_string(), 50),
+            WordData::new("Be".to_string(), 50),
+            WordData::new("Ba".to_string(), 5),
+            WordData::new("Bah".to_string(), 5),
         ];
 
         assert_eq!(expected_words, words);
