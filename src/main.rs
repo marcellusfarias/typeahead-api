@@ -1,3 +1,6 @@
+use crate::trie::Trie;
+use actix_web::{get, middleware, App, HttpResponse, HttpServer};
+use std::net::SocketAddr;
 use std::sync::Arc;
 use std::sync::Mutex;
 
@@ -35,7 +38,32 @@ mod trie;
 // QUESTIONS:
 // 1. Think we should store the tree on the disk or load the entire dataset into memory. Ask about file size?
 
-fn main() {
-    // let trie: Arc<Mutex<trie::Trie>> = trie::Trie::new(10);
-    // let x = trie.lock().unwrap();
+#[actix_rt::main]
+async fn main() -> std::io::Result<()> {
+    // let trie: Arc<Mutex<trie::Trie>>;
+    let trie = Trie::new(10);
+    let shared_trie: Arc<Mutex<Trie>> = Arc::new(Mutex::new(trie));
+
+    let bind_address: SocketAddr = format!("{}:{}", "0.0.0.0", "2020")
+        .parse()
+        .expect("Unable to parse socket address");
+
+    HttpServer::new(move || {
+        App::new()
+            .wrap(middleware::Logger::default())
+            .app_data(shared_trie.clone())
+            .service(handlers::get_words_match_prefix)
+            .service(handlers::increase_popularity)
+            .service(health_check)
+        // .service(whatsapp_hook)
+    })
+    .bind(bind_address)?
+    .run()
+    .await
+}
+
+#[get("/health")]
+async fn health_check() -> HttpResponse {
+    // info!("Service is health    y and accepting requests");
+    HttpResponse::Ok().json("Service is healthy")
 }

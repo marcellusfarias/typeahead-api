@@ -16,6 +16,13 @@ pub struct Trie {
 }
 
 impl Trie {
+    pub fn new(suggestion_number: u8) -> Trie {
+        Trie {
+            root: Box::new(Node::new(' ', None)),
+            suggestion_number,
+        }
+    }
+
     fn get_words_with_same_prefix(prefix_node: &Node, result_vec: &mut Vec<WordData>) {
         for child_node in prefix_node.children.values() {
             if let Some(word_data) = child_node.word_data.clone() {
@@ -29,10 +36,7 @@ impl Trie {
 
 impl ITrie for Trie {
     fn initialize(file_content: &str, suggestion_number: u8) -> Result<Trie, AppError> {
-        let mut trie = Trie {
-            root: Box::new(Node::new(' ', None)),
-            suggestion_number,
-        };
+        let mut trie = Trie::new(suggestion_number);
 
         let values: HashMap<String, u16> =
             serde_json::from_str(file_content).map_err(|_e| AppError::InvalidFileContent)?;
@@ -129,20 +133,6 @@ impl ITrie for Trie {
     }
 }
 
-//storing the word in the node so we can work with lowercase all over the way avoiding case insensitive problems.
-//assuming we can't have 2 same words but with different casing. E.g., Rose-Marie and Rose-marie
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct WordData {
-    pub word: String,
-    pub popularity: u16,
-}
-
-impl WordData {
-    pub fn new(word: String, popularity: u16) -> WordData {
-        WordData { word, popularity }
-    }
-}
-
 #[derive(Debug, Clone)]
 pub struct Node {
     pub children: HashMap<char, Box<Node>>,
@@ -157,6 +147,20 @@ impl Node {
             letter,
             word_data,
         }
+    }
+}
+
+//storing the word in the node so we can work with lowercase all over the way avoiding case insensitive problems.
+//assuming we can't have 2 same words but with different casing. E.g., Rose-Marie and Rose-marie
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WordData {
+    pub word: String,
+    pub popularity: u16,
+}
+
+impl WordData {
+    pub fn new(word: String, popularity: u16) -> WordData {
+        WordData { word, popularity }
     }
 }
 
@@ -206,10 +210,7 @@ mod tests {
     }
 
     fn initialize_testing_trie() -> Trie {
-        let mut expected_trie = Trie {
-            root: Box::new(Node::new(' ', None)),
-            suggestion_number: 10,
-        };
+        let mut expected_trie = Trie::new(10);
 
         let mut node: &mut Box<Node> = &mut expected_trie.root;
 
@@ -300,11 +301,7 @@ mod tests {
     }
 
     fn insert_word_testing_trie() -> Trie {
-        let mut expected_trie = Trie {
-            root: Box::new(Node::new(' ', None)),
-            suggestion_number: 10,
-        };
-
+        let mut expected_trie = Trie::new(10);
         let mut node: &mut Box<Node> = &mut expected_trie.root;
 
         // (A) first level
@@ -405,10 +402,7 @@ mod tests {
     }
 
     fn increase_popularity_testing_trie() -> Trie {
-        let mut expected_trie = Trie {
-            root: Box::new(Node::new(' ', None)),
-            suggestion_number: 10,
-        };
+        let mut expected_trie = Trie::new(10);
 
         let mut node: &mut Box<Node> = &mut expected_trie.root;
 
