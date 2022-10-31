@@ -1,8 +1,9 @@
+use serde::{Deserialize, Serialize};
+
 use crate::app_error::AppError;
 use std::collections::HashMap;
 
-// all methodos should return a RESULT. Need to remove unwraps from them
-trait ITrie {
+pub trait ITrie {
     fn initialize(file_content: &str, suggestion_number: u8) -> Result<Trie, AppError>;
     fn insert_word(&mut self, word: String, popularity: u16) -> Result<(), AppError>;
     fn increase_popularity(&mut self, word: String) -> Result<WordData, AppError>;
@@ -16,7 +17,7 @@ pub struct Trie {
 }
 
 impl Trie {
-    pub fn new(suggestion_number: u8) -> Trie {
+    fn new(suggestion_number: u8) -> Trie {
         Trie {
             root: Box::new(Node::new(' ', None)),
             suggestion_number,
@@ -152,7 +153,7 @@ impl Node {
 
 //storing the word in the node so we can work with lowercase all over the way avoiding case insensitive problems.
 //assuming we can't have 2 same words but with different casing. E.g., Rose-Marie and Rose-marie
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WordData {
     pub word: String,
     pub popularity: u16,

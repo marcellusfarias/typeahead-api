@@ -11,6 +11,8 @@ pub enum AppError {
     WordDoesNotExist,
     #[display(fmt = "Unexpected internal error.")]
     UnexpectedError,
+    #[display(fmt = "Bad request.")]
+    BadRequest,
 }
 
 impl error::ResponseError for AppError {
@@ -23,7 +25,7 @@ impl error::ResponseError for AppError {
             AppError::InvalidFileContent | AppError::UnexpectedError => {
                 StatusCode::INTERNAL_SERVER_ERROR
             }
-            AppError::WordDoesNotExist => StatusCode::BAD_REQUEST,
+            AppError::WordDoesNotExist | AppError::BadRequest => StatusCode::BAD_REQUEST,
         }
     }
 }

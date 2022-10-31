@@ -1,5 +1,6 @@
-use crate::trie::Trie;
+use crate::trie::{ITrie, Trie};
 use actix_web::{get, middleware, App, HttpResponse, HttpServer};
+use std::fs;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -41,7 +42,10 @@ mod trie;
 #[actix_rt::main]
 async fn main() -> std::io::Result<()> {
     // let trie: Arc<Mutex<trie::Trie>>;
-    let trie = Trie::new(10);
+    let file_content =
+        fs::read_to_string("./names.json").expect("Should have been able to read the file");
+
+    let trie = Trie::initialize(&file_content, 10).unwrap();
     let shared_trie: Arc<Mutex<Trie>> = Arc::new(Mutex::new(trie));
 
     let bind_address: SocketAddr = format!("{}:{}", "0.0.0.0", "2020")
@@ -62,6 +66,7 @@ async fn main() -> std::io::Result<()> {
     .await
 }
 
+#[allow(clippy::unused_async)]
 #[get("/health")]
 async fn health_check() -> HttpResponse {
     // info!("Service is health    y and accepting requests");
