@@ -6,6 +6,7 @@ use std::sync::Arc;
 use std::sync::Mutex;
 
 mod app_error;
+mod config;
 mod handlers;
 mod trie;
 // PARAMS: suggestion_number, port, host
@@ -41,14 +42,19 @@ mod trie;
 
 #[actix_rt::main]
 async fn main() -> std::io::Result<()> {
+    log4rs::init_file("log4rs.yml", log4rs::config::Deserializers::default()).unwrap();
+
+    let config =
+        crate::config::Config::from_env().expect("Could not load configuration from environment!");
+
     // let trie: Arc<Mutex<trie::Trie>>;
     let file_content =
         fs::read_to_string("./names.json").expect("Should have been able to read the file");
 
-    let trie = Trie::initialize(&file_content, 10).unwrap();
+    let trie = Trie::initialize(&file_content, config.suggestion_number).unwrap();
     let shared_trie: Arc<Mutex<Trie>> = Arc::new(Mutex::new(trie));
 
-    let bind_address: SocketAddr = format!("{}:{}", "0.0.0.0", "2020")
+    let bind_address: SocketAddr = format!("{}:{}", config.host, config.port)
         .parse()
         .expect("Unable to parse socket address");
 
