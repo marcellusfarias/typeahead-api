@@ -9,35 +9,41 @@
 # BUILD STAGE
 # =======================================================================
 #
-FROM rust:alpine AS builder 
+FROM rust AS builder 
 ARG APP_NAME=type-ahead-api
 # Update the packages used to build so that they are the latest ones which
 # will be incorporated in the exe
 
-RUN apk upgrade --update-cache && \
-    apk add --no-cache musl-dev build-base cmake && \
-    rm -rf /var/cache/apk/*
+# RUN apk upgrade --update-cache && \
+#     apk add --no-cache musl-dev build-base cmake && \
+#     rm -rf /var/cache/apk/*
 
-WORKDIR /usr/src/
-RUN rustup target add x86_64-unknown-linux-musl
-
-RUN USER=root cargo new ${APP_NAME}
 WORKDIR /usr/src/${APP_NAME}
-# COPY Cargo.toml Cargo.lock ./
-COPY ./Cargo.toml ./ 
-# Cargo.lock ./
-# RUN echo "fn main() {println!(\"if you see this, the build broke\")}" > src/main.rs
+# RUN rustup target add x86_64-unknown-linux-musl
+COPY ./src ./src
+COPY ./Cargo.toml .
+COPY ./Cargo.lock .
+COPY ./log4rs.yml .
+COPY ./names.json .
+RUN ls -l
+# RUN USER=root cargo new ${APP_NAME}
 
-RUN cargo build --release
-RUN rm -rf /build/src
-RUN rm -rf /build/target/release/.fingerprint/${APP_NAME}-*
+# COPY Cargo.toml Cargo.lock ./
+# COPY log4rs.yml ./ 
+# COPY names.json ./ 
+# WORKDIR /usr/src/${APP_NAME}
 
 # Build the application with cross platform support so it can be run on
 # a different version of linux
-COPY ./src ./src
-COPY ./log4rs.yml /log4rs.yml 
-COPY ./names.json /names.json 
-RUN cargo install --target x86_64-unknown-linux-musl --path .
+
+# COPY ./src ./src
+
+# RUN cargo install --target x86_64-unknown-linux-musl --path .
+RUN cargo install --path .
+
+# RUN cargo build --release
+# RUN rm -rf /build/src
+# RUN rm -rf /build/target/release/.fingerprint/${APP_NAME}-*
 
 # Change the name of the application so that the remaininder of the 
 # Dockerfile is generic 
@@ -52,21 +58,25 @@ RUN mv /usr/local/cargo/bin/${APP_NAME} /app-exe
 # The image size was 17.7 MB 
 # =======================================================================
 #
-FROM alpine
-
+FROM debian:buster-slim
+ARG APP_NAME=type-ahead-api
 # Update all packages in Alpine to the latest version. Need to do this to ensure
 # all security patches etc are up to date
-RUN apk upgrade --update-cache && \
-    rm -rf /var/cache/apk/*
+# RUN apk upgrade --update-cache && \
+#     rm -rf /var/cache/apk/*
+
+RUN apt-get update && apt-get install -y && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
 COPY --from=builder /app-exe .
-COPY --from=builder /log4rs.yml .
+COPY --from=builder /usr/src/${APP_NAME}/log4rs.yml .
+COPY --from=builder /usr/src/${APP_NAME}/names.json .
+RUN ls  -F
 
 # Create the app-user and set the privs for the dir and its contents
-RUN addgroup -g 1000 app-user
-RUN adduser -D -s /bin/sh -u 1000 -G app-user app-user
+RUN addgroup --gid 1000 app-user
+RUN adduser --disabled-password --shell /bin/sh --uid 1000 --ingroup app-user app-user
 RUN chown -R app-user:app-user /app
 
 # This will export the PORT environment variable to your application.

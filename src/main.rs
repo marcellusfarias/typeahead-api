@@ -1,5 +1,6 @@
 use crate::trie::{ITrie, Trie};
 use actix_web::{get, middleware, App, HttpResponse, HttpServer};
+use log::info;
 use std::fs;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -44,12 +45,13 @@ mod trie;
 async fn main() -> std::io::Result<()> {
     log4rs::init_file("log4rs.yml", log4rs::config::Deserializers::default()).unwrap();
 
+    info!("Starting service...");
+
     let config =
         crate::config::Config::from_env().expect("Could not load configuration from environment!");
 
     // let trie: Arc<Mutex<trie::Trie>>;
-    let file_content =
-        fs::read_to_string("./names.json").expect("Should have been able to read the file");
+    let file_content = fs::read_to_string("./names.json").expect("JSON file not found");
 
     let trie = Trie::initialize(&file_content, config.suggestion_number).unwrap();
     let shared_trie: Arc<Mutex<Trie>> = Arc::new(Mutex::new(trie));
