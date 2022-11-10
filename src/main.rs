@@ -25,9 +25,12 @@ async fn main() -> std::io::Result<()> {
     let trie = Trie::initialize(&file_content, config.suggestion_number).unwrap();
     let shared_trie: Arc<Mutex<Trie>> = Arc::new(Mutex::new(trie));
 
-    let bind_address: SocketAddr = format!("{}:{}", config.host, config.port)
-        .parse()
-        .expect("Unable to parse socket address");
+    // let bind_address: SocketAddr = format!("{}:{}", config.host, config.port)
+    //     .parse()
+    //     .expect("Unable to parse socket address");
+
+    let server_address = format!("{}:{}", config.host, config.port);
+    info!("Starting server at {}", server_address);
 
     HttpServer::new(move || {
         App::new()
@@ -38,7 +41,7 @@ async fn main() -> std::io::Result<()> {
             .service(health_check)
         // .service(whatsapp_hook)
     })
-    .bind(bind_address)?
+    .bind(server_address)?
     .run()
     .await
 }
