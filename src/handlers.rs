@@ -47,5 +47,5 @@ async fn increase_popularity(
 
     let json = json! ({ "name": result.word, "times": result.popularity });
 
-    Ok(HttpResponse::Ok().json(json))
+    Ok(HttpResponse::Created().json(json))
 }
