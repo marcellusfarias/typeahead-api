@@ -92,11 +92,6 @@ impl ITrie for Trie {
         Ok(updated_word_data)
     }
 
-    //[ok] order by value and return SUGGESTION_NUMBER items
-    //[ok] name in ascending order if they have equal popularity
-    //[ok] always leaving the exact match (a name that is exactly the received prefix) at the beginning if there is one
-    //[ok] If the prefix segment of the path is not given or it's empty, it returns the SUGGESTION_NUMBER names with the highest popularity.
-    //[ok] handle case sensitive
     fn get_typeahead_words(&self, prefix: String) -> Result<Vec<WordData>, AppError> {
         let mut node = &self.root;
         let prefix = prefix.to_ascii_lowercase();
@@ -105,7 +100,8 @@ impl ITrie for Trie {
             if let Some(new_node) = node.children.get(&char) {
                 node = new_node;
             } else {
-                return Ok(Vec::new()); //if there is not a single word that starts with the prefix.
+                //if there is not a single word that starts with the prefix.
+                return Ok(Vec::new()); 
             }
         }
 

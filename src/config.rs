@@ -1,5 +1,4 @@
-pub use ::config::ConfigError;
-
+use config::ConfigError;
 use serde::Deserialize;
 
 #[derive(Deserialize)]
@@ -7,6 +6,7 @@ use serde::Deserialize;
 // Struct to hold the configuration variables stored in env variables
 pub struct Config {
     pub host: String,
+    pub file_name: String,
     pub port: String,
     pub suggestion_number: u8,
 }
