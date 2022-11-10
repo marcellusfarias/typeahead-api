@@ -13,7 +13,7 @@ use std::sync::Mutex;
 #[get("/typeahead/{prefix}")]
 async fn get_words_match_prefix(
     shared_trie: web::Data<Arc<Mutex<Trie>>>,
-    prefix: web::Query<String>,
+    prefix: web::Path<String>,
 ) -> Result<HttpResponse, AppError> {
     // Trace the message body received as this is the only way found to be able to log the request body and hence figure out any json issues before trying to parse it
     info!("prefix: \n{:?}", prefix);

@@ -1,5 +1,5 @@
 use crate::trie::{ITrie, Trie};
-use actix_web::{get, middleware, App, HttpResponse, HttpServer};
+use actix_web::{get, middleware, App, HttpResponse, HttpServer, web};
 use log::info;
 use std::fs;
 use std::net::SocketAddr;
@@ -60,10 +60,12 @@ async fn main() -> std::io::Result<()> {
         .parse()
         .expect("Unable to parse socket address");
 
+    // info!("Starting webserver. Bind_address {:?}", bind_address);
+
     HttpServer::new(move || {
         App::new()
-            .wrap(middleware::Logger::default())
-            .app_data(shared_trie.clone())
+            .app_data(web::Data::new(shared_trie.clone()))
+            .wrap(middleware::Logger::default())            
             .service(handlers::get_words_match_prefix)
             .service(handlers::increase_popularity)
             .service(health_check)
