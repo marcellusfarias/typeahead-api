@@ -151,7 +151,9 @@ impl Node {
 //assuming we can't have 2 same words but with different casing. E.g., Rose-Marie and Rose-marie
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WordData {
+    #[serde(rename(serialize = "name"))]
     pub word: String,
+    #[serde(rename(serialize = "times"))]
     pub popularity: u16,
 }
 
@@ -615,7 +617,7 @@ mod tests {
     }
 
     #[test]
-    fn t_get_typeahead_words_tied_words() {
+    fn t_get_typeahead_words_same_popularity_words() {
         let mut trie = initialize_testing_trie();
         trie.suggestion_number = 2;
         let words = trie.get_typeahead_words("B".to_string()).unwrap();

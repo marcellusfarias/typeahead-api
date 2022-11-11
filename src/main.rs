@@ -37,6 +37,7 @@ async fn main() -> std::io::Result<()> {
             .app_data(web::Data::new(shared_trie.clone()))
             .wrap(middleware::Logger::default())            
             .service(handlers::get_words_match_prefix)
+            .service(handlers::get_words_match_empty_prefix)
             .service(handlers::increase_popularity)
             .service(health_check)
         // .service(whatsapp_hook)
