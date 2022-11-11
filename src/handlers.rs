@@ -24,9 +24,24 @@ async fn get_words_match_prefix(
     Ok(HttpResponse::Ok().json(result))
 }
 
-// This function is needed according to this: https://github.com/actix/actix-web/issues/1054
+// These functions are needed according to this: https://github.com/actix/actix-web/issues/1054
+// One handlers with multiple routes will be release at 4.2: https://github.com/actix/actix-web/pull/2718
 #[allow(clippy::unused_async)]
 #[get("/typeahead/")]
+async fn get_words_match_empty_prefix_with_last_slash(
+    shared_trie: web::Data<Arc<Mutex<Trie>>>,
+) -> Result<HttpResponse, AppError> {
+    // Trace the message body received as this is the only way found to be able to log the request body and hence figure out any json issues before trying to parse it
+    info!("prefix is empty");
+
+    let trie = shared_trie.lock().unwrap();
+    let result = trie.get_typeahead_words(String::new())?;
+
+    Ok(HttpResponse::Ok().json(result))
+}
+
+#[allow(clippy::unused_async)]
+#[get("/typeahead")]
 async fn get_words_match_empty_prefix(
     shared_trie: web::Data<Arc<Mutex<Trie>>>,
 ) -> Result<HttpResponse, AppError> {
@@ -34,7 +49,7 @@ async fn get_words_match_empty_prefix(
     info!("prefix is empty");
 
     let trie = shared_trie.lock().unwrap();
-    let result = trie.get_typeahead_words("".to_string())?;
+    let result = trie.get_typeahead_words(String::new())?;
 
     Ok(HttpResponse::Ok().json(result))
 }
@@ -67,12 +82,10 @@ async fn increase_popularity(
 
 #[cfg(test)]
 mod tests {
-    use http;
-    use httptest::{matchers::*, responders::*, Expectation, Server};
     use crate::trie::{ITrie, Trie};
     use std::sync::Arc;
     use std::sync::Mutex;
-    use crate::handlers::{get_words_match_prefix, increase_popularity, get_words_match_empty_prefix};
+    use crate::handlers::{get_words_match_prefix, increase_popularity, get_words_match_empty_prefix,get_words_match_empty_prefix_with_last_slash};
     use actix_web::{body::Body, test, web::Bytes, App};
     use actix_web::http::StatusCode;
 
@@ -213,11 +226,32 @@ mod tests {
     }
 
     #[actix_rt::test]
-    async fn t_get_words_match_prefix_prefix_empty() {
+    async fn t_get_words_match_prefix_empty_prefix() {
         let trie = get_default_trie();
         let shared_trie: Arc<Mutex<Trie>> = Arc::new(Mutex::new(trie));
         
         let app = App::new().data(shared_trie).service(get_words_match_empty_prefix);
+        let mut app = test::init_service(app).await;
+
+        let req = test::TestRequest::get().uri("/typeahead").to_request();
+        println!("req: {:?}", req);
+
+        let mut resp = test::call_service(&mut app, req).await;
+        println!("response: {:?}", &resp);
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(
+            resp.take_body().as_ref().unwrap(),
+            &Body::from_slice(b"[{\"name\":\"Abag\",\"times\":704},{\"name\":\"Aba\",\"times\":608},{\"name\":\"Aar\",\"times\":361},{\"name\":\"Abe\",\"times\":300},{\"name\":\"Aari\",\"times\":151}]")
+        );
+    }
+
+    #[actix_rt::test]
+    async fn t_get_words_match_prefix_empty_prefix_with_last_slash() {
+        let trie = get_default_trie();
+        let shared_trie: Arc<Mutex<Trie>> = Arc::new(Mutex::new(trie));
+        
+        let app = App::new().data(shared_trie).service(get_words_match_empty_prefix_with_last_slash);
         let mut app = test::init_service(app).await;
 
         let req = test::TestRequest::get().uri("/typeahead/").to_request();

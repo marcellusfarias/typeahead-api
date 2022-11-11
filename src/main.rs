@@ -2,7 +2,6 @@ use crate::trie::{ITrie, Trie};
 use actix_web::{get, middleware, App, HttpResponse, HttpServer, web};
 use log::info;
 use std::fs;
-use std::net::SocketAddr;
 use std::sync::Arc;
 use std::sync::Mutex;
 
@@ -38,6 +37,7 @@ async fn main() -> std::io::Result<()> {
             .wrap(middleware::Logger::default())            
             .service(handlers::get_words_match_prefix)
             .service(handlers::get_words_match_empty_prefix)
+            .service(handlers::get_words_match_empty_prefix_with_last_slash)
             .service(handlers::increase_popularity)
             .service(health_check)
         // .service(whatsapp_hook)
