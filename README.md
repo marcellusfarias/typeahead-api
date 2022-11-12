@@ -67,3 +67,7 @@ $ curl -X POST -H "Content-Type: application/json" -d '{"name": "Joanna"}' http:
 ### 5. Performance
 
 There is a JMeter file for testing performances. I have not gathered reports for it yet.
+
+### 6. How to run
+
+You can run it building the image like `docker build -t typeahead-api .` and running it using `docker run -d -e PORT=65432 -e HOST=localhost -e SUGGESTION_NUMBER=10 typeahead-api`
